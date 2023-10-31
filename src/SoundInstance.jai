@@ -49,8 +49,7 @@ set_position :: (instance: SoundInstance, position: Vector3) {
         return;
     }
 
-    velocity: Vector3;
-    result := FMOD_Channel_Set3DAttributes(instance.fmod_channel, *position, *velocity);
+    result := FMOD_Channel_Set3DAttributes(instance.fmod_channel, *position, null);
     if result {
         print("FMOD error. %\n", result);
     }
@@ -87,10 +86,15 @@ get_volume :: (instance: SoundInstance) -> float {
         return 0;
     }
 
-    volume: float64;
-    FMOD_Channel_GetUserData(instance.fmod_channel, cast(**void) *volume);
+    volume_scale := get_volume_scale(instance);
+    if volume_scale == 0 {
+        return 0;
+    }
 
-    return cast(float) volume;
+    volume: float;
+    FMOD_Channel_GetVolume(instance.fmod_channel, *volume);
+
+    return volume / volume_scale;
 }
 
 set_volume :: (instance: SoundInstance, volume: float) {
@@ -98,12 +102,36 @@ set_volume :: (instance: SoundInstance, volume: float) {
         return;
     }
 
-    raw_volume := get_raw_volume(instance);
-    volume64 := cast(float64) volume;
-    FMOD_Channel_SetUserData(instance.fmod_channel, (cast(**void) *volume64).*);
-
-    set_raw_volume(instance, raw_volume);
+    volume_scale := get_volume_scale(instance);
+    FMOD_Channel_SetVolume(instance.fmod_channel, volume * volume_scale);
 }
+
+// get_raw_volume :: (instance: SoundInstance) -> float {
+//     if !instance.fmod_channel {
+//         return 0;
+//     }
+
+//     volume: float;
+//     FMOD_Channel_GetVolume(instance.fmod_channel, *volume);
+
+//     denom := get_default_volume(instance) * get_volume(instance);
+//     if denom == 0 {
+//         return 0;
+//     }
+
+//     return volume / denom;
+// }
+
+// set_raw_volume :: (instance: SoundInstance, volume: float) {
+//     if !instance.fmod_channel {
+//         return;
+//     }
+
+//     if volume * get_default_volume(instance) * get_volume(instance) > 1 {
+//         print("volume % | % % %\n", volume * get_default_volume(instance) * get_volume(instance), volume, get_default_volume(instance), get_volume(instance));
+//     }
+//     FMOD_Channel_SetVolume(instance.fmod_channel, volume * get_default_volume(instance) * get_volume(instance));
+// }
 
 get_raw_volume :: (instance: SoundInstance) -> float {
     if !instance.fmod_channel {
@@ -113,20 +141,54 @@ get_raw_volume :: (instance: SoundInstance) -> float {
     volume: float;
     FMOD_Channel_GetVolume(instance.fmod_channel, *volume);
 
-    denom := get_default_volume(instance) * get_volume(instance);
-    if denom == 0 {
+    return volume;
+}
+
+get_volume_scale :: (instance: SoundInstance) -> float {
+    if !instance.fmod_channel {
         return 0;
     }
 
-    return volume / denom;
+    volume_scale: float64;
+    FMOD_Channel_GetUserData(instance.fmod_channel, cast(**void) *volume_scale);
+
+    return cast(float) volume_scale;
 }
 
-set_raw_volume :: (instance: SoundInstance, volume: float) {
+set_volume_scale_internal :: (instance: SoundInstance, volume: float) {
     if !instance.fmod_channel {
         return;
     }
 
-    FMOD_Channel_SetVolume(instance.fmod_channel, volume * get_default_volume(instance) * get_volume(instance));
+    fmod_sound: *FMOD_SOUND;
+    FMOD_Channel_GetCurrentSound(instance.fmod_channel, *fmod_sound);
+
+    user_data: *Sound;
+    FMOD_Sound_GetUserData(fmod_sound, cast(*void) *user_data);
+
+    sound_volume := user_data.default_volume;
+
+    volume64 := cast(float64) (volume * sound_volume);
+    FMOD_Channel_SetUserData(instance.fmod_channel, (cast(**void) *volume64).*);
+}
+
+get_muted :: (instance: SoundInstance) -> bool {
+    if !instance.fmod_channel {
+        return false;
+    }
+
+    muted: s32;
+    FMOD_Channel_GetMute(instance.fmod_channel, *muted);
+
+    return !!muted;
+}
+
+set_muted :: (instance: SoundInstance, muted: bool) {
+    if !instance.fmod_channel {
+        return;
+    }
+
+    FMOD_Channel_SetMute(instance.fmod_channel, ifx muted then cast(s32) 1 else cast(s32) 0);
 }
 
 get_type :: (instance: SoundInstance) -> SoundType {
@@ -335,19 +397,19 @@ fade_in :: (instance: SoundInstance, duration: float, delay: float = 0) {
     FMOD_Channel_AddFadePoint(instance.fmod_channel, dspclock + delay_pcm + cast(u64) (duration / 1000.0 * sample_rate), 1.0);
 }
 
-get_default_volume :: (instance: SoundInstance) -> float {
-    if !instance.fmod_channel {
-        return 0;
-    }
+// get_default_volume :: (instance: SoundInstance) -> float {
+//     if !instance.fmod_channel {
+//         return 0;
+//     }
 
-    fmod_sound: *FMOD_SOUND;
-    FMOD_Channel_GetCurrentSound(instance.fmod_channel, *fmod_sound);
+//     fmod_sound: *FMOD_SOUND;
+//     FMOD_Channel_GetCurrentSound(instance.fmod_channel, *fmod_sound);
 
-    user_data: *Sound;
-    FMOD_Sound_GetUserData(fmod_sound, cast(*void) *user_data);
+//     user_data: *Sound;
+//     FMOD_Sound_GetUserData(fmod_sound, cast(*void) *user_data);
 
-    return user_data.default_volume;
-}
+//     return user_data.default_volume;
+// }
 
 // in milliseconds
 get_duration :: (instance: SoundInstance) -> float {

@@ -9,6 +9,8 @@ Sound :: struct {
     default_directional_strength: float;
     fmod_size_dsp: *FMOD_DSP;
     volume_ramp: bool;
+    priority: int = 0;
+    // memory_buffers: [20] [] u8;
 }
 
 SoundType :: enum {
@@ -23,7 +25,7 @@ SoundType :: enum {
 // TODO I can request load all files, it'll auto hash and serialize/deserialize, and then load from memory will read from this internal block instead by file name
 // TODO file name just points to start byte and length
 
-load_sound3 :: (paths: ..string, loop: bool = false, volume: float = 1.0, size: float = 0.0, directional_strength: float = 1.0, volume_ramp: bool = false) -> *Sound {
+load_sound3 :: (paths: ..string, loop: bool = false, volume: float = 1.0, size: float = 0.0, directional_strength: float = 1.0, volume_ramp: bool = false, priority: int = 0) -> *Sound {
     sound := New(Sound);
     sound.type = .Sound3;
     sound.count = paths.count;
@@ -31,16 +33,33 @@ load_sound3 :: (paths: ..string, loop: bool = false, volume: float = 1.0, size: 
     sound.default_size = size;
     sound.default_directional_strength = directional_strength;
     sound.volume_ramp = volume_ramp;
+    sound.priority = priority;
 
     assert(paths.count <= sound.fmod_sounds.count, "More than 10 or 20 or something sounds not currently supported for simplicity.");
     for path: paths {
         assert(path.count < 512, "Audio path is too long.");
     }
 
-    sound_type := FMOD_3D;
+    // for path, index: paths {
+    //     file, loaded := read_entire_file(path);
+    //     assert(loaded, "Could not load fmod sound.");
+
+    //     sound.memory_buffers[index].data = file.data;
+    //     sound.memory_buffers[index].count = file.count;
+    // }
+
+    sound_type := FMOD_3D | FMOD_CREATESAMPLE;
     if loop {
         sound_type |= FMOD_LOOP_NORMAL;
     }
+
+    // sound_type |= FMOD_3D_LINEARROLLOFF;
+
+    // rolloff: [] Vector3;
+    // if custom_rolloff.count > 0 {
+    //     rolloff = get_custom_rolloff_for_distance(custom_rolloff_distance);
+    //     sound_type |= FMOD_3D_CUSTOMROLLOFF;
+    // }
 
     for path, index: paths {
         fixed_path: [512] u8;
@@ -56,6 +75,11 @@ load_sound3 :: (paths: ..string, loop: bool = false, volume: float = 1.0, size: 
         }
 
         FMOD_Sound_SetUserData(sound.fmod_sounds[index], sound);
+        FMOD_Sound_SetDefaults(sound.fmod_sounds[index], 48000, cast(s32) sound.priority);
+        // FMOD_Sound_Set3DMinMaxDistance(sound.fmod_sounds[index], 0.5, 10.0);
+        // if rolloff.count > 0 {
+        //     FMOD_Sound_Set3DCustomRolloff(sound.fmod_sounds[index], rolloff.data, xx rolloff.count);
+        // }
     }
 
     if sound.default_size > 0 {
@@ -66,20 +90,21 @@ load_sound3 :: (paths: ..string, loop: bool = false, volume: float = 1.0, size: 
     return sound;
 }
 
-load_sound2 :: (paths: ..string, loop: bool = false, volume: float = 1.0, size: float = 0.0, volume_ramp: bool = false) -> *Sound {
+load_sound2 :: (paths: ..string, loop: bool = false, volume: float = 1.0, size: float = 0.0, volume_ramp: bool = false, priority: int = 0) -> *Sound {
     sound := New(Sound);
     sound.type = .Sound2;
     sound.count = paths.count;
     sound.default_volume = volume;
     sound.default_size = size;
     sound.volume_ramp = volume_ramp;
+    sound.priority = priority;
 
     assert(paths.count <= sound.fmod_sounds.count, "More than 10 or 20 or something sounds not currently supported for simplicity.");
     for path: paths {
         assert(path.count < 512, "Audio path is too long.");
     }
 
-    sound_type := FMOD_DEFAULT;
+    sound_type := FMOD_DEFAULT | FMOD_CREATESAMPLE;
     if loop {
         sound_type |= FMOD_LOOP_NORMAL;
     }
@@ -98,6 +123,7 @@ load_sound2 :: (paths: ..string, loop: bool = false, volume: float = 1.0, size: 
         }
 
         FMOD_Sound_SetUserData(sound.fmod_sounds[index], sound);
+        FMOD_Sound_SetDefaults(sound.fmod_sounds[index], 48000, cast(s32) sound.priority);
     }
 
     return sound;
@@ -126,17 +152,16 @@ play_sound :: (sound: Sound, volume: float = 1.0, index: int = -1) -> SoundInsta
 
     assert(index >= 0 && index < sound.count, "Invalid index for audio source.");
 
-    print("% playing %\n", get_time(), sound.names[index]);
+    // print("% playing %\n", get_time(), sound.names[index]);
 
     FMOD_System_PlaySound(fmod_system, sound.fmod_sounds[index], null, 0, *sound_instance.fmod_channel);
 
-    if sound.volume_ramp {
-        set_volume_ramp(sound_instance, true);
-    }
+    set_volume_ramp(sound_instance, sound.volume_ramp);
 
     if sound.fmod_size_dsp {
         FMOD_Channel_AddDSP(sound_instance.fmod_channel, 0, sound.fmod_size_dsp);
     } else {
+        // ensure no size dsp carries over unintentionally
         numdsps: s32;
         FMOD_Channel_GetNumDSPs(sound_instance.fmod_channel, *numdsps);
         // dsp: *FMOD_DSP;
@@ -145,9 +170,9 @@ play_sound :: (sound: Sound, volume: float = 1.0, index: int = -1) -> SoundInsta
         assert(numdsps == 1, "DSP cannot exist here. I want to be sure it's not reused.");
     }
 
-    final_volume := sound.default_volume * volume;
-    set_volume(sound_instance, final_volume);
-    set_raw_volume(sound_instance, final_volume);
+    volume_scale := sound.default_volume * volume;
+    set_volume_scale_internal(sound_instance, volume_scale);
+    set_volume(sound_instance, 1.0);
 
     if sound.type == .Sound3 {
         final_directional_strength := global_directional_strength * sound.default_directional_strength;

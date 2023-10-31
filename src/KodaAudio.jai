@@ -1,10 +1,14 @@
 
 koda_audio_init :: () {
+    FMOD_Thread_SetAttributes(FMOD_THREAD_TYPE.MAX, FMOD_THREAD_AFFINITY_GROUP_DEFAULT, FMOD_THREAD_PRIORITY_CRITICAL, FMOD_THREAD_STACK_SIZE_DEFAULT);
+
     result := FMOD_System_Create(*fmod_system, FMOD_VERSION);
     if result {
         print("FMOD create error. %\n", result);
         return;
     }
+
+    FMOD_Thread_SetAttributes(FMOD_THREAD_TYPE.MAX, FMOD_THREAD_AFFINITY_GROUP_DEFAULT, FMOD_THREAD_PRIORITY_CRITICAL, FMOD_THREAD_STACK_SIZE_DEFAULT);
 
     version: u32;
     result = FMOD_System_GetVersion(fmod_system, *version);
@@ -14,10 +18,15 @@ koda_audio_init :: () {
     }
 
     result = FMOD_System_Init(fmod_system, 256, FMOD_INIT_NORMAL | FMOD_INIT_3D_RIGHTHANDED, null);
+    
+    FMOD_Thread_SetAttributes(FMOD_THREAD_TYPE.MAX, FMOD_THREAD_AFFINITY_GROUP_DEFAULT, FMOD_THREAD_PRIORITY_CRITICAL, FMOD_THREAD_STACK_SIZE_DEFAULT);
+
     if result {
         print("FMOD init error. %\n", result);
         return;
     }
+
+    // FMOD_System_SetDSPBufferSize(fmod_system, 4096, 2);
 }
 
 koda_audio_destroy :: () {
@@ -100,23 +109,21 @@ koda_audio_set_directional_strength :: (strength: float) {
 }
 
 koda_audio_set_custom_rolloff :: (points: [] Vector2) {
-    array_reserve(*custom_rolloff, points.count);
-    array_reserve(*custom_rolloff_scaled, points.count);
+    array_resize(*custom_rolloff, points.count);
 
-    custom_rolloff.count = points.count;
-    custom_rolloff_scaled.count = points.count;
-
-    custom_rolloff_distance = points[points.count - 1].x;
+    maximum_rolloff_distance := points[points.count - 1].x;
+    if custom_rolloff_distance == 0 {
+        custom_rolloff_distance = maximum_rolloff_distance;
+    }
 
     for point, index: points {
-        custom_rolloff[index] = Vector3.{point.x / custom_rolloff_distance, point.y, 0.0};
-        custom_rolloff_scaled[index] = Vector3.{};
+        custom_rolloff[index] = Vector2.{point.x / maximum_rolloff_distance, point.y};
     }
+
+    print("final custom rolloff %\n", custom_rolloff);
 }
 
 koda_audio_set_custom_rolloff_distance :: (distance: float) {
-    assert(custom_rolloff.count > 0, "You can only set a custom rolloff distance once a rolloff function has been defined.");
-
     custom_rolloff_distance = distance;
 }
 
@@ -132,16 +139,17 @@ fmod_system: *FMOD_SYSTEM;
 #scope_module
 
 get_custom_rolloff_for_distance :: (distance: float) -> [] Vector3 {
+    custom_rolloff_scaled: [..] Vector3;
+    custom_rolloff_scaled.allocator = temp;
+    array_resize(*custom_rolloff_scaled, custom_rolloff.count);
     for i: 0..custom_rolloff.count - 1 {
-        custom_rolloff_scaled[i] = custom_rolloff[i] * distance;
+        custom_rolloff_scaled[i] = Vector3.{custom_rolloff[i].x * distance, custom_rolloff[i].y, 0};
     }
 
     return custom_rolloff_scaled;
 }
 
-custom_rolloff: [..] Vector3;
+custom_rolloff: [..] Vector2;
 custom_rolloff_distance: float;
-
-custom_rolloff_scaled: [..] Vector3;
 
 global_directional_strength: float = 1.0;
