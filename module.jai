@@ -7,6 +7,7 @@
 
 #import "KodaJai";
 #import "FmodJai";
+#import "FmodStudioJai";
 #import "Basic";
 #import "Math";
 #import "Random";
