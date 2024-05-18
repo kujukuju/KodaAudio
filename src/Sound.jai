@@ -17,7 +17,9 @@ load_sound :: (id: FMOD_GUID) -> *Sound {
         assert(false);
     }
 
-    assert(!FMOD_Studio_EventDescription_LoadSampleData(sound.event_description));
+    error := FMOD_Studio_EventDescription_LoadSampleData(sound.event_description);
+    assert(!error);
+    FMOD_Studio_EventDescription_SetUserData(sound.event_description, sound);
 
     return sound;
 }
@@ -28,13 +30,15 @@ load_sound :: (path: string) -> *Sound {
     memcpy(fixed.data, path.data, path.count);
 
     sound := New(Sound);
-    result := FMOD_Studio_System_GetEvent(fmod_system, fixed.data, *sound.event_description);
-    if result {
-        print("FMOD get event error. %\n", result);
+    error := FMOD_Studio_System_GetEvent(fmod_system, fixed.data, *sound.event_description);
+    if error {
+        print("FMOD get event error. %\n", error);
         assert(false);
     }
 
-    assert(!FMOD_Studio_EventDescription_LoadSampleData(sound.event_description));
+    error = FMOD_Studio_EventDescription_LoadSampleData(sound.event_description);
+    assert(!error);
+    FMOD_Studio_EventDescription_SetUserData(sound.event_description, sound);
 
     return sound;
 }
@@ -46,24 +50,66 @@ play_sound :: (sound: *Sound, volume: float = 1.0, index: int = -1) -> SoundInst
 
     instance: SoundInstance;
 
-    assert(!FMOD_Studio_EventDescription_CreateInstance(sound.event_description, *instance.event_instance));
-    assert(!FMOD_Studio_EventInstance_Start(instance.event_instance));
+    error := FMOD_Studio_EventDescription_CreateInstance(sound.event_description, *instance.event_instance);
+    assert(!error);
+
+    error = FMOD_Studio_EventInstance_Start(instance.event_instance);
+    assert(!error);
+
+    set_volume(instance, volume);
+    // if get_type(instance) == .Sound3 {
+    //     set_volume(instance, volume, 0);
+    // } else {
+    //     set_volume(instance, volume, 1);
+    // }
+
+    if event_start_callback {
+        thread_safe_event_start_callback :: inline (instance: SoundInstance) {
+            event_start_callback(instance);
+        } @thread_safe
+
+        thread_safe_event_start_callback(instance);
+    }
 
     return instance, -1;
-}
+} @thread
 
 play_sound :: (sound: *Sound, position: Vector3, volume: float = 1.0, index: int = -1) -> SoundInstance, int {
     instance := play_sound(sound, volume, index);
     set_position(instance, position);
 
     return instance, -1;
-}
+} @thread
 
 play_sound :: (sound: *Sound, position: Vector3, velocity: Vector3, volume: float = 1.0, index: int = -1) -> SoundInstance, int {
     instance := play_sound(sound, volume, index);
     set_position_velocity(instance, position, velocity);
 
     return instance, -1;
+} @thread
+
+get_path :: (sound: *Sound) -> string {
+    path: [..] u8;
+    path.allocator = temp;
+    array_reserve(*path, 256);
+
+    used_count := cast(s32) path.allocated;
+    while used_count == path.allocated {
+        if FMOD_Studio_EventDescription_GetPath(sound.event_description, path.data, cast(s32) path.allocated, *used_count) {
+            assert(false, "Could not get path.\n");
+            return "";
+        }
+
+        path.count = used_count;
+        if used_count == path.allocated {
+            array_reserve(*path, path.allocated * 2);
+        }
+    }
+
+    path_string: string;
+    path_string.data = path.data;
+    path_string.count = path.count;
+    return path_string;
 }
 
 
@@ -215,7 +261,7 @@ play_sound :: (sound: *Sound, position: Vector3, velocity: Vector3, volume: floa
 
 //     assert(index >= 0 && index < sound.count, "Invalid index for audio source.");
 
-//     // print("% playing %\n", get_time(), sound.names[index]);
+//     // print("% playing %\n", seconds_since_init(), sound.names[index]);
 
 //     FMOD_System_PlaySound(fmod_system, sound.fmod_sounds[index], null, 0, *sound_instance.fmod_channel);
 

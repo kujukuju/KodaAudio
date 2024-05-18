@@ -23,7 +23,8 @@ koda_audio_load_bank :: (path: string) {
     fixed: [512] u8;
     memcpy(fixed.data, path.data, path.count);
 
-    assert(!FMOD_Studio_System_LoadBankFile(fmod_system, fixed.data, FMOD_STUDIO_LOAD_BANK_NORMAL, *fmod_bank));
+    error := FMOD_Studio_System_LoadBankFile(fmod_system, fixed.data, FMOD_STUDIO_LOAD_BANK_NORMAL, *fmod_bank);
+    assert(!error);
 
     state: FMOD_STUDIO_LOADING_STATE;
     FMOD_Studio_Bank_GetLoadingState(fmod_bank, *state);
@@ -37,7 +38,8 @@ koda_audio_load_bank :: (path: string) {
 
 koda_audio_destroy :: () {
     // FMOD_Studio_System_Close(fmod_system);
-    assert(!FMOD_Studio_System_Release(fmod_system));
+    error := FMOD_Studio_System_Release(fmod_system);
+    assert(!error);
     fmod_system = null;
 }
 
@@ -62,37 +64,45 @@ koda_audio_update_camera :: (position: Vector3, forward: Vector3, up: Vector3, v
     attributes.forward = forward;
     attributes.up = up;
 
-    assert(!FMOD_Studio_System_SetListenerAttributes(fmod_system, 0, *attributes, null));
+    error := FMOD_Studio_System_SetListenerAttributes(fmod_system, 0, *attributes, null);
+    assert(!error);
 }
 
 koda_audio_get_muted :: () -> bool {
     master_bus: *FMOD_STUDIO_BUS;
-    assert(!FMOD_Studio_System_GetBus(fmod_system, "bus:/", *master_bus));
+    error := FMOD_Studio_System_GetBus(fmod_system, "bus:/", *master_bus);
+    assert(!error);
 
     muted: FMOD_BOOL;
-    assert(!FMOD_Studio_Bus_GetMuted(master_bus, *muted));
+    error = FMOD_Studio_Bus_GetMuted(master_bus, *muted);
+    assert(!error);
     
     return !!muted;
 }
 
 koda_audio_set_muted :: (muted: bool) {
     master_bus: *FMOD_STUDIO_BUS;
-    assert(!FMOD_Studio_System_GetBus(fmod_system, "bus:/", *master_bus));
+    error := FMOD_Studio_System_GetBus(fmod_system, "bus:/", *master_bus);
+    assert(!error);
 
     if muted {
-        assert(!FMOD_Studio_Bus_SetMute(master_bus, 1));
+        error = FMOD_Studio_Bus_SetMute(master_bus, 1);
+        assert(!error);
     } else {
-        assert(!FMOD_Studio_Bus_SetMute(master_bus, 0));
+        error = FMOD_Studio_Bus_SetMute(master_bus, 0);
+        assert(!error);
     }
 }
 
 koda_audio_get_banks :: () -> [] *FMOD_STUDIO_BANK {
     count: s32;
-    assert(!FMOD_Studio_System_GetBankCount(fmod_system, *count));
+    error := FMOD_Studio_System_GetBankCount(fmod_system, *count);
+    assert(!error);
 
     real_count: s32;
     banks := NewArray(count, *FMOD_STUDIO_BANK,, allocator = temp);
-    assert(!FMOD_Studio_System_GetBankList(fmod_system, banks.data, count, *real_count));
+    error = FMOD_Studio_System_GetBankList(fmod_system, banks.data, count, *real_count);
+    assert(!error);
 
     banks.count = real_count;
     return banks;
@@ -102,7 +112,8 @@ koda_audio_get_event_descriptions :: (banks: [] *FMOD_STUDIO_BANK) -> [] *FMOD_S
     total_count: s32;
     for bank: banks {
         count: s32;
-        assert(!FMOD_Studio_Bank_GetEventCount(bank, *count));
+        error := FMOD_Studio_Bank_GetEventCount(bank, *count);
+        assert(!error);
 
         total_count += count;
     }
@@ -132,7 +143,8 @@ koda_audio_get_event_instances :: (events: [] *FMOD_STUDIO_EVENTDESCRIPTION) -> 
     total_count: s32;
     for event: events {
         count: s32;
-        assert(!FMOD_Studio_EventDescription_GetInstanceCount(event, *count));
+        error := FMOD_Studio_EventDescription_GetInstanceCount(event, *count);
+        assert(!error);
 
         total_count += count;
     }
@@ -146,9 +158,9 @@ koda_audio_get_event_instances :: (events: [] *FMOD_STUDIO_EVENTDESCRIPTION) -> 
 
     for event: events {
         real_count: s32;
-        result := FMOD_Studio_EventDescription_GetInstanceList(event, instances.data + instances.count, total_count - cast(s32) instances.count, *real_count);
-        if result {
-            print("FMOD get instance list error. %\n", result);
+        error := FMOD_Studio_EventDescription_GetInstanceList(event, instances.data + instances.count, total_count - cast(s32) instances.count, *real_count);
+        if error {
+            print("FMOD get instance list error. %\n", error);
             assert(false);
         }
 
@@ -183,6 +195,24 @@ koda_audio_get_event_instances :: (events: [] *FMOD_STUDIO_EVENTDESCRIPTION) -> 
 
 //     return instance;
 // }
+
+koda_audio_set_preupdate_callback :: (callback: #type ()) {
+    preupdate_callback = callback;
+    callback_type := ifx preupdate_callback then FMOD_STUDIO_SYSTEM_CALLBACK_PREUPDATE else 0;
+    callback_type |= ifx postupdate_callback then FMOD_STUDIO_SYSTEM_CALLBACK_POSTUPDATE else 0;
+    FMOD_Studio_System_SetCallback(fmod_system, fmod_callback, cast(u32) callback_type);
+}
+
+koda_audio_set_postupdate_callback :: (callback: #type ()) {
+    postupdate_callback = callback;
+    callback_type := ifx preupdate_callback then FMOD_STUDIO_SYSTEM_CALLBACK_PREUPDATE else 0;
+    callback_type |= ifx postupdate_callback then FMOD_STUDIO_SYSTEM_CALLBACK_POSTUPDATE else 0;
+    FMOD_Studio_System_SetCallback(fmod_system, fmod_callback, cast(u32) callback_type);
+}
+
+koda_audio_set_event_start_callback :: (callback: #type (instance: SoundInstance)) {
+    event_start_callback = callback;
+}
 
 koda_audio_get_active_sounds :: () -> [] SoundInstance {
     event_instances := koda_audio_get_event_instances(koda_audio_get_event_descriptions(koda_audio_get_banks()));
@@ -223,13 +253,35 @@ koda_audio_set_custom_rolloff_distance :: (distance: float) {
 
 koda_audio_get_sample_rate :: () -> int {
     core_system: *FMOD_SYSTEM;
-    assert(!FMOD_Studio_System_GetCoreSystem(fmod_system, *core_system));
+    error := FMOD_Studio_System_GetCoreSystem(fmod_system, *core_system);
+    assert(!error);
 
     sample_rate: s32;
-    assert(!FMOD_System_GetSoftwareFormat(core_system, *sample_rate, null, null));
+    error = FMOD_System_GetSoftwareFormat(core_system, *sample_rate, null, null);
+    assert(!error);
 
     return sample_rate;
-}
+} @thread
+
+koda_audio_get_buffer_size :: () -> int {
+    core_system: *FMOD_SYSTEM;
+    error := FMOD_Studio_System_GetCoreSystem(fmod_system, *core_system);
+    assert(!error);
+
+    bufferlength: u32;
+    numbuffers: s32;
+    error = FMOD_System_GetDSPBufferSize(core_system, *bufferlength, *numbuffers);
+    assert(!error);
+
+    return cast(int) bufferlength * numbuffers;
+} @thread
+
+koda_audio_get_estimated_delay :: () -> int {
+    buffer_size := koda_audio_get_buffer_size();
+    sample_rate := koda_audio_get_sample_rate();
+
+    return buffer_size * 1000 / sample_rate;
+} @thread
 
 get_guid :: (guid: *u8) -> FMOD_GUID {
     value: FMOD_GUID;
@@ -254,7 +306,26 @@ get_custom_rolloff_for_distance :: (distance: float) -> [] Vector3 {
     return custom_rolloff_scaled;
 }
 
+fmod_callback :: (system: *FMOD_STUDIO_SYSTEM, type: FMOD_STUDIO_SYSTEM_CALLBACK_TYPE, commanddata: *void, userdata: *void) -> FMOD_RESULT #c_call {
+    empty: Context;
+    push_context empty {
+        if preupdate_callback && (type & FMOD_STUDIO_SYSTEM_CALLBACK_PREUPDATE) {
+            preupdate_callback();
+        }
+
+        if postupdate_callback && (type & FMOD_STUDIO_SYSTEM_CALLBACK_POSTUPDATE) {
+            postupdate_callback();
+        }
+    }
+
+    return .FMOD_OK;
+} @thread_unlocked
+
 custom_rolloff: [..] Vector2;
 custom_rolloff_distance: float;
 
 global_directional_strength: float = 1.0;
+
+preupdate_callback: #type ();
+postupdate_callback: #type ();
+event_start_callback: #type (instance: SoundInstance);
