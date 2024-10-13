@@ -12,7 +12,9 @@ VolumeData :: struct {
 get_sound :: (instance: SoundInstance) -> *Sound {
     description: *FMOD_STUDIO_EVENTDESCRIPTION;
     FMOD_Studio_EventInstance_GetDescription(instance.event_instance, *description);
-    assert(!!description);
+    if !description {
+        return null;
+    }
 
     sound: *Sound;
     FMOD_Studio_EventDescription_GetUserData(description, cast(*void) *sound);

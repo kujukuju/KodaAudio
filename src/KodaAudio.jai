@@ -81,6 +81,10 @@ koda_audio_get_muted :: () -> bool {
 }
 
 koda_audio_set_muted :: (muted: bool) {
+    if !fmod_system {
+        return;
+    }
+    
     master_bus: *FMOD_STUDIO_BUS;
     error := FMOD_Studio_System_GetBus(fmod_system, "bus:/", *master_bus);
     assert(!error);
@@ -92,6 +96,19 @@ koda_audio_set_muted :: (muted: bool) {
         error = FMOD_Studio_Bus_SetMute(master_bus, 0);
         assert(!error);
     }
+}
+
+koda_audio_set_volume :: (volume: float) {
+    if !fmod_system {
+        return;
+    }
+
+    master_bus: *FMOD_STUDIO_BUS;
+    error := FMOD_Studio_System_GetBus(fmod_system, "bus:/", *master_bus);
+    assert(!error);
+
+    error = FMOD_Studio_Bus_SetVolume(master_bus, volume);
+    assert(!error);
 }
 
 koda_audio_get_banks :: () -> [] *FMOD_STUDIO_BANK {
