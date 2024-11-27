@@ -111,26 +111,92 @@ koda_audio_set_volume :: (volume: float) {
     assert(!error);
 }
 
+// BanksIterator :: struct {
+//     system: *FMOD_STUDIO_SYSTEM;
+// }
+
+// koda_audio_get_banks :: () -> BanksIterator {
+//     return BanksIterator.{fmod_system};
+// }
+
+// for_expansion :: (iterator: BanksIterator, body: Code, flags: For_Flags) #expand {
+//     #assert(!(flags & .REVERSE));
+//     #assert !(flags & .POINTER) "Banks iterator is always a pointer.\n";
+
+//     count: s32;
+//     error := FMOD_Studio_System_GetBankCount(fmod_system, *count);
+//     assert(!error, "Cannot get system bank count. %\n", error);
+
+//     for i: 0..count - 1 {
+//         bank: *FMOD_STUDIO_BANK;
+//         bank_count: s32;
+//         error = FMOD_Studio_System_GetBankList(iterator.system, *bank, 1, *bank_count);
+//         assert(!error, "Cannot get bank at index %. %\n", i, error);
+        
+//         if bank_count != 1 {
+//             continue;
+//         }
+
+//         `it := bank;
+//         `it_index := i;
+
+//         #insert body;
+//     }
+// }
+
 koda_audio_get_banks :: () -> [] *FMOD_STUDIO_BANK {
     count: s32;
     error := FMOD_Studio_System_GetBankCount(fmod_system, *count);
-    assert(!error);
+    assert(!error, "Cannot get bank count. %\n", error);
 
     real_count: s32;
     banks := NewArray(count, *FMOD_STUDIO_BANK,, allocator = temp);
     error = FMOD_Studio_System_GetBankList(fmod_system, banks.data, count, *real_count);
-    assert(!error);
+    assert(!error, "Cannot get bank list. %\n", error);
 
     banks.count = real_count;
     return banks;
 }
+
+// EventDescriptionsIterator :: struct {
+//     bank: *FMOD_STUDIO_BANK;
+// }
+
+// koda_audio_get_event_descriptions :: (bank: *FMOD_STUDIO_BANK) -> EventDescriptionsIterator {
+//     return EventDescriptionsIterator.{bank};
+// }
+
+// for_expansion :: (iterator: EventDescriptionsIterator, body: Code, flags: For_Flags) #expand {
+//     #assert(!(flags & .REVERSE));
+//     #assert !(flags & .POINTER) "Event descriptions iterator is always a pointer.\n";
+
+//     count: s32;
+//     error := FMOD_Studio_Bank_GetEventCount(iterator.bank, *count);
+//     assert(!error, "Cannot get event count. %\n", error);
+
+//     for i: 0..count - 1 {
+//         event: *FMOD_STUDIO_EVENTDESCRIPTION;
+//         event_count: s32;
+//         error = FMOD_Studio_Bank_GetEventList(iterator.bank, *event, 1, *event_count);
+//         assert(!error, "Cannot get event at index %. %\n", i, error);
+        
+//         if event_count != 1 {
+//             continue;
+//         }
+
+//         `it := event;
+//         `it_index := i;
+
+//         #insert body;
+//     }
+// }
 
 koda_audio_get_event_descriptions :: (banks: [] *FMOD_STUDIO_BANK) -> [] *FMOD_STUDIO_EVENTDESCRIPTION {
     total_count: s32;
     for bank: banks {
         count: s32;
         error := FMOD_Studio_Bank_GetEventCount(bank, *count);
-        assert(!error);
+        assert(!error, "Cannot get event count. %\n", error);
 
         total_count += count;
     }
@@ -144,24 +210,53 @@ koda_audio_get_event_descriptions :: (banks: [] *FMOD_STUDIO_BANK) -> [] *FMOD_S
 
     for bank: banks {
         real_count: s32;
-        result := FMOD_Studio_Bank_GetEventList(bank, events.data + events.count, total_count - cast(s32) events.count, *real_count);
+        error := FMOD_Studio_Bank_GetEventList(bank, events.data + events.count, total_count - cast(s32) events.count, *real_count);
+        assert(!error, "Cannot get event list. %\n", error);
         events.count += real_count;
-
-        if result {
-            print("FMOD get event error. %\n", result);
-            assert(false);
-        }
     }
 
     return events;
 }
+
+// EventInstancesIterator :: struct {
+//     event: *FMOD_STUDIO_EVENTDESCRIPTION;
+// }
+
+// koda_audio_get_event_instances :: (event: *FMOD_STUDIO_EVENTDESCRIPTION) -> EventInstancesIterator {
+//     return EventInstancesIterator.{event};
+// }
+
+// for_expansion :: (iterator: EventInstancesIterator, body: Code, flags: For_Flags) #expand {
+//     #assert(!(flags & .REVERSE));
+//     #assert !(flags & .POINTER) "Event instances iterator is always a pointer.\n";
+
+//     count: s32;
+//     error := FMOD_Studio_EventDescription_GetInstanceCount(iterator.event, *count);
+//     assert(!error, "Cannot get instance count. %\n", error);
+
+//     for i: 0..count - 1 {
+//         instance: *FMOD_STUDIO_EVENTINSTANCE;
+//         instance_count: s32;
+//         error = FMOD_Studio_EventDescription_GetInstanceList(iterator.event, *instance, 1, *instance_count);
+//         assert(!error, "Cannot get instance at index %. %\n", i, error);
+        
+//         if instance_count != 1 {
+//             continue;
+//         }
+
+//         `it := instance;
+//         `it_index := i;
+
+//         #insert body;
+//     }
+// }
 
 koda_audio_get_event_instances :: (events: [] *FMOD_STUDIO_EVENTDESCRIPTION) -> [] *FMOD_STUDIO_EVENTINSTANCE {
     total_count: s32;
     for event: events {
         count: s32;
         error := FMOD_Studio_EventDescription_GetInstanceCount(event, *count);
-        assert(!error);
+        assert(!error, "Cannot get instance count. %\n", error);
 
         total_count += count;
     }
@@ -176,15 +271,21 @@ koda_audio_get_event_instances :: (events: [] *FMOD_STUDIO_EVENTDESCRIPTION) -> 
     for event: events {
         real_count: s32;
         error := FMOD_Studio_EventDescription_GetInstanceList(event, instances.data + instances.count, total_count - cast(s32) instances.count, *real_count);
-        if error {
-            print("FMOD get instance list error. %\n", error);
-            assert(false);
-        }
+        assert(!error, "Cannot get instance list. %\n", error);
 
         instances.count += real_count;
     }
 
     return instances;
+}
+
+koda_audio_stop_all_event_instances :: () {
+    master_bus: *FMOD_STUDIO_BUS;
+    error := FMOD_Studio_System_GetBus(fmod_system, "bus:/", *master_bus);
+    assert(!error, "Get bus error %.\n", error);
+
+    error = FMOD_Studio_Bus_StopAllEvents(master_bus, .ALLOWFADEOUT);
+    assert(!error, "Stop all events error %.\n", error);
 }
 
 // koda_audio_get_active_sound_count :: () -> int {
@@ -231,11 +332,39 @@ koda_audio_set_event_start_callback :: (callback: #type (instance: SoundInstance
     event_start_callback = callback;
 }
 
+// SoundInstanceIterator :: struct {
+    
+// }
+
+// koda_audio_get_active_sounds :: () -> SoundInstanceIterator {
+//     return SoundInstanceIterator.{};
+// }
+
+// for_expansion :: (iterator: SoundInstanceIterator, body: Code, flags: For_Flags) #expand {
+//     #assert(!(flags & .REVERSE));
+//     #assert !(flags & .POINTER) "Sound instance iterator cannot be a pointer.\n";
+
+//     index := 0;
+//     for bank: koda_audio_get_banks() {
+//         for event: koda_audio_get_event_descriptions(bank) {
+//             for instance: koda_audio_get_event_instances(event) {
+//                 defer index += 1;
+
+//                 `it := SoundInstance.{instance};
+//                 `it_index := index;
+
+//                 #insert body;
+//             }
+//         }
+//     }
+// }
+
 koda_audio_get_active_sounds :: () -> [] SoundInstance {
     event_instances := koda_audio_get_event_instances(koda_audio_get_event_descriptions(koda_audio_get_banks()));
+
     instances := NewArray(event_instances.count, SoundInstance,, allocator = temp);
     for event_instance, index: event_instances {
-        instances[index].event_instance = event_instance;
+        instances[index] = SoundInstance.{event_instance};
     }
 
     return instances;

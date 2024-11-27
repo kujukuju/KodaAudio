@@ -9,26 +9,41 @@ VolumeData :: struct {
 }
 #assert(size_of(VolumeData) == size_of(*void));
 
+is_valid :: (instance: SoundInstance) -> bool {
+    return instance.event_instance && FMOD_Studio_EventInstance_IsValid(instance.event_instance);
+} @thread
+
 get_sound :: (instance: SoundInstance) -> *Sound {
+    if !is_valid(instance) {
+        return null;
+    }
+
     description: *FMOD_STUDIO_EVENTDESCRIPTION;
-    FMOD_Studio_EventInstance_GetDescription(instance.event_instance, *description);
+    error := FMOD_Studio_EventInstance_GetDescription(instance.event_instance, *description);
+    assert(!error, "Could not get description. %\n", error);
     if !description {
         return null;
     }
 
     sound: *Sound;
-    FMOD_Studio_EventDescription_GetUserData(description, cast(*void) *sound);
-    assert(!!sound);
+    error = FMOD_Studio_EventDescription_GetUserData(description, cast(*void) *sound);
+    assert(!error, "Could not get user data. %\n", error);
+    assert(!!sound, "Could not get sound.\n");
 
     return sound;
 } @thread
 
 release_sound :: (instance: SoundInstance) {
-    FMOD_Studio_EventInstance_Release(instance.event_instance);
+    if !is_valid(instance) {
+        return;
+    }
+
+    error := FMOD_Studio_EventInstance_Release(instance.event_instance);
+    assert(!error, "Could not release instance. %\n", error);
 }
 
 get_position :: (instance: SoundInstance) -> Vector3 {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return .{};
     }
 
@@ -44,7 +59,7 @@ set_position :: (instance: SoundInstance, position: Vector3) {
 } @thread
 
 set_position_velocity :: (instance: SoundInstance, position: Vector3, velocity: Vector3) {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return;
     }
 
@@ -55,34 +70,78 @@ set_position_velocity :: (instance: SoundInstance, position: Vector3, velocity: 
     attributes.up = .{0, 1, 0};
 
     error := FMOD_Studio_EventInstance_Set3DAttributes(instance.event_instance, *attributes);
-    assert(!error, "Set 3d error.\n");
+    assert(!error, "Set 3d error %.\n", error);
 } @thread
 
 is_playing :: (instance: SoundInstance) -> bool {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return false;
     }
 
     playback_state: FMOD_STUDIO_PLAYBACK_STATE;
-    FMOD_Studio_EventInstance_GetPlaybackState(instance.event_instance, *playback_state);
+    error := FMOD_Studio_EventInstance_GetPlaybackState(instance.event_instance, *playback_state);
+    assert(!error, "Get playback state error. %\n", error);
 
-    return playback_state != .STOPPED;
+    return playback_state != .STOPPED && playback_state != .STOPPING;
 } @thread
 
+is_starting :: (instance: SoundInstance) -> bool {
+    if !is_valid(instance) {
+        return false;
+    }
+
+    playback_state: FMOD_STUDIO_PLAYBACK_STATE;
+    error := FMOD_Studio_EventInstance_GetPlaybackState(instance.event_instance, *playback_state);
+    assert(!error, "Get playback state error. %\n", error);
+
+    return playback_state == .STARTING;
+} @thread
+
+get_hardware_latency :: (instance: SoundInstance) -> int {
+    if !is_playing(instance) || is_starting(instance) {
+        return 0;
+    }
+
+    channel_group := get_channel_group(instance);
+    if !channel_group {
+        return 0;
+    }
+    
+    child_clock: u64;
+    parent_clock: u64;
+    error := FMOD_ChannelGroup_GetDSPClock(channel_group, *child_clock, *parent_clock);
+    assert(!error, "Channel group get dsp clock error. %\n", error);
+
+    sample_rate := koda_audio_get_sample_rate();
+    return (cast(s64) parent_clock - cast(s64) child_clock) * 1000 / sample_rate;
+}
+
+get_channel_group :: (instance: SoundInstance) -> *FMOD_CHANNELGROUP {
+    if !is_playing(instance) || is_starting(instance) {
+        return null;
+    }
+
+    channel_group: *FMOD_CHANNELGROUP;
+    error := FMOD_Studio_EventInstance_GetChannelGroup(instance.event_instance, *channel_group);
+    assert(!error, "Get channel group error. %\n", error);
+
+    return channel_group;
+}
+
 get_time :: (instance: SoundInstance) -> int {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return 0;
     }
 
     position: s32;
     error := FMOD_Studio_EventInstance_GetTimelinePosition(instance.event_instance, *position);
-    assert(!error);
+    assert(!error, "Get timeline position error. %\n", error);
 
     return position;
 } @thread
 
 set_time :: (instance: SoundInstance, time: int) {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return;
     }
 
@@ -92,7 +151,7 @@ set_time :: (instance: SoundInstance, time: int) {
 } @thread
 
 get_type :: (instance: SoundInstance) -> SoundType {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return .Invalid;
     }
 
@@ -120,7 +179,7 @@ get_type :: (instance: SoundInstance) -> SoundType {
 // } @thread
 
 // get_rolloff_volume :: (instance: SoundInstance) -> float {
-//     if !instance.event_instance {
+//     if !is_valid(instance) {
 //         return 0;
 //     }
 
@@ -132,19 +191,22 @@ get_type :: (instance: SoundInstance) -> SoundType {
 // }
 
 get_volume :: (instance: SoundInstance) -> float, float {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return 0, 0;
     }
     
     volume_data: VolumeData;
     error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *volume_data);
-    assert(!error);
+    assert(!error, "Event instance get user data failed. %\n", error);
+    if error {
+        return 0, 0;
+    }
 
     return volume_data.volume, volume_data.rolloff_volume;
 } @thread
 
 set_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float) {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return;
     }
 
@@ -159,7 +221,7 @@ set_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float) {
 }
 
 set_volume :: (instance: SoundInstance, volume: float) {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return;
     }
 
@@ -174,7 +236,7 @@ set_volume :: (instance: SoundInstance, volume: float) {
 } @thread
 
 set_rolloff_volume :: (instance: SoundInstance, rolloff_volume: float) {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return;
     }
 
@@ -189,7 +251,7 @@ set_rolloff_volume :: (instance: SoundInstance, rolloff_volume: float) {
 } @thread
 
 resolve_volume :: (instance: SoundInstance) {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return;
     }
 
@@ -198,7 +260,7 @@ resolve_volume :: (instance: SoundInstance) {
 } @thread
 
 resolve_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float) {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return;
     }
 
@@ -207,7 +269,7 @@ resolve_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float
 } @thread
 
 get_duration :: (instance: SoundInstance) -> int {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return 0;
     }
 
@@ -223,7 +285,7 @@ get_duration :: (instance: SoundInstance) -> int {
 } @thread
 
 stop :: (instance: SoundInstance) {
-    if !instance.event_instance {
+    if !is_valid(instance) {
         return;
     }
 
