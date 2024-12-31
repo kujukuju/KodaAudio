@@ -52,16 +52,14 @@ play_sound :: (sound: *Sound, volume: float = 1.0, index: int = -1) -> SoundInst
 
     error := FMOD_Studio_EventDescription_CreateInstance(sound.event_description, *instance.event_instance);
     assert(!error);
+    
+    error = FMOD_Studio_EventInstance_SetVolume(instance.event_instance, 0);
+    assert(!error);
 
     error = FMOD_Studio_EventInstance_Start(instance.event_instance);
     assert(!error);
 
-    set_volume(instance, volume);
-    // if get_type(instance) == .Sound3 {
-    //     set_volume(instance, volume, 0);
-    // } else {
-    //     set_volume(instance, volume, 1);
-    // }
+    set_volume(instance, volume, resolve = false);
 
     if event_start_callback {
         thread_safe_event_start_callback :: inline (instance: SoundInstance) {

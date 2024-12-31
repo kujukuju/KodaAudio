@@ -205,7 +205,7 @@ get_volume :: (instance: SoundInstance) -> float, float {
     return volume_data.volume, volume_data.rolloff_volume;
 } @thread
 
-set_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float) {
+set_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float, resolve: bool = true) {
     if !is_valid(instance) {
         return;
     }
@@ -217,10 +217,12 @@ set_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float) {
     error := FMOD_Studio_EventInstance_SetUserData(instance.event_instance, (cast(**void) *volume_data).*);
     assert(!error);
 
-    resolve_volume(instance, volume_data.volume, volume_data.rolloff_volume);
+    if resolve {
+        resolve_volume(instance, volume_data.volume, volume_data.rolloff_volume);
+    }
 }
 
-set_volume :: (instance: SoundInstance, volume: float) {
+set_volume :: (instance: SoundInstance, volume: float, resolve: bool = true) {
     if !is_valid(instance) {
         return;
     }
@@ -232,7 +234,9 @@ set_volume :: (instance: SoundInstance, volume: float) {
     error := FMOD_Studio_EventInstance_SetUserData(instance.event_instance, (cast(**void) *volume_data).*);
     assert(!error);
 
-    resolve_volume(instance, volume_data.volume, volume_data.rolloff_volume);
+    if resolve {
+        resolve_volume(instance, volume_data.volume, volume_data.rolloff_volume);
+    }
 } @thread
 
 set_rolloff_volume :: (instance: SoundInstance, rolloff_volume: float) {
@@ -265,6 +269,15 @@ resolve_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float
     }
 
     error := FMOD_Studio_EventInstance_SetVolume(instance.event_instance, volume * rolloff_volume);
+    assert(!error);
+} @thread
+
+force_volume :: (instance: SoundInstance, volume: float) {
+    if !is_valid(instance) {
+        return;
+    }
+
+    error := FMOD_Studio_EventInstance_SetVolume(instance.event_instance, volume);
     assert(!error);
 } @thread
 
