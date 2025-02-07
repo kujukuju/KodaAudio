@@ -1,4 +1,8 @@
 
+DSP :: struct {
+    dsp: *FMOD_DSP;
+}
+
 koda_audio_init :: () {
     result := FMOD_Studio_System_Create(*fmod_system, FMOD_VERSION);
     if result {
@@ -76,7 +80,7 @@ koda_audio_get_muted :: () -> bool {
     muted: FMOD_BOOL;
     error = FMOD_Studio_Bus_GetMuted(master_bus, *muted);
     assert(!error);
-    
+
     return !!muted;
 }
 
@@ -84,7 +88,7 @@ koda_audio_set_muted :: (muted: bool) {
     if !fmod_system {
         return;
     }
-    
+
     master_bus: *FMOD_STUDIO_BUS;
     error := FMOD_Studio_System_GetBus(fmod_system, "bus:/", *master_bus);
     assert(!error);
@@ -132,7 +136,7 @@ koda_audio_set_volume :: (volume: float) {
 //         bank_count: s32;
 //         error = FMOD_Studio_System_GetBankList(iterator.system, *bank, 1, *bank_count);
 //         assert(!error, "Cannot get bank at index %. %\n", i, error);
-        
+
 //         if bank_count != 1 {
 //             continue;
 //         }
@@ -179,7 +183,7 @@ koda_audio_get_banks :: () -> [] *FMOD_STUDIO_BANK {
 //         event_count: s32;
 //         error = FMOD_Studio_Bank_GetEventList(iterator.bank, *event, 1, *event_count);
 //         assert(!error, "Cannot get event at index %. %\n", i, error);
-        
+
 //         if event_count != 1 {
 //             continue;
 //         }
@@ -239,7 +243,7 @@ koda_audio_get_event_descriptions :: (banks: [] *FMOD_STUDIO_BANK) -> [] *FMOD_S
 //         instance_count: s32;
 //         error = FMOD_Studio_EventDescription_GetInstanceList(iterator.event, *instance, 1, *instance_count);
 //         assert(!error, "Cannot get instance at index %. %\n", i, error);
-        
+
 //         if instance_count != 1 {
 //             continue;
 //         }
@@ -333,7 +337,7 @@ koda_audio_set_event_start_callback :: (callback: #type (instance: SoundInstance
 }
 
 // SoundInstanceIterator :: struct {
-    
+
 // }
 
 // koda_audio_get_active_sounds :: () -> SoundInstanceIterator {
@@ -429,6 +433,119 @@ koda_audio_get_estimated_delay :: () -> int {
     return buffer_size * 1000 / sample_rate;
 } @thread
 
+koda_audio_get_master_channel_group :: () -> *FMOD_CHANNELGROUP {
+    core_system: *FMOD_SYSTEM;
+    error := FMOD_Studio_System_GetCoreSystem(fmod_system, *core_system);
+    assert(!error);
+
+    channel_group: *FMOD_CHANNELGROUP;
+    error = FMOD_System_GetMasterChannelGroup(core_system, *channel_group);
+    assert(!error);
+
+    return channel_group;
+} @thread
+
+DspIterator :: struct {
+    channel_group: *FMOD_CHANNELGROUP;
+    channel_count: s32;
+}
+
+koda_audio_get_channel_group_dsps :: (channel_group: *FMOD_CHANNELGROUP) -> DspIterator {
+    channel_count: s32;
+    error := FMOD_ChannelGroup_GetNumDSPs(channel_group, *channel_count);
+    assert(!error);
+
+    return DspIterator.{
+        channel_group,
+        channel_count,
+    };
+}
+
+for_expansion :: (iterator: DspIterator, body: Code, flags: For_Flags) #expand {
+    #assert(!(flags & .REVERSE));
+    #assert(!(flags & .POINTER));
+
+    for i: 0..iterator.channel_count - 1 {
+        dsp: *FMOD_DSP;
+
+        error := FMOD_ChannelGroup_GetDSP(iterator.channel_group, i, *dsp);
+        assert(!error);
+
+        if !dsp {
+            continue;
+        }
+
+        `it := dsp;
+        `it_index := i;
+
+        #insert body;
+    }
+}
+
+koda_audio_create_dsp :: ($callback: (samples: [] float, channels: int) #c_call) -> DSP {
+    core_system: *FMOD_SYSTEM;
+    error := FMOD_Studio_System_GetCoreSystem(fmod_system, *core_system);
+    assert(!error);
+
+    description: FMOD_DSP_DESCRIPTION;
+    description.version = FMOD_VERSION;
+    description.numinputbuffers = 1;
+    description.numoutputbuffers = 1;
+
+    read_callback :: (dsp_state: *FMOD_DSP_STATE, inbuffer: *float, outbuffer: *float, length: u32, inchannels: s32, outchannels: *s32) -> FMOD_RESULT #c_call {
+        memcpy(outbuffer, inbuffer, cast(s64) length * inchannels * size_of(float));
+        view: [] float;
+        view.data = inbuffer;
+        view.count = cast(s64) length * inchannels;
+
+        callback(view, cast(int) inchannels);
+
+        return .FMOD_OK;
+    } @thread_unlocked
+
+    description.read = read_callback;
+
+    dsp: *FMOD_DSP;
+    error = FMOD_System_CreateDSP(core_system, *description, *dsp);
+
+    return DSP.{dsp};
+}
+
+koda_audio_attach_dsp :: (dsp: DSP) {
+    channel_group := koda_audio_get_master_channel_group();
+
+    error := FMOD_ChannelGroup_AddDSP(channel_group, 0, dsp.dsp);
+    assert(!error, "Failed to attach DSP.\n");
+    assert(!error, "Failed to attach DSP.\n");
+}
+
+koda_audio_detach_dsp :: (dsp: DSP) {
+    channel_group := koda_audio_get_master_channel_group();
+
+    error := FMOD_ChannelGroup_RemoveDSP(channel_group, dsp.dsp);
+    assert(!error, "Failed to remove DSP.\n");
+}
+
+koda_audio_is_dsp_attached :: (dsp: DSP) -> bool {
+    channel_group := koda_audio_get_master_channel_group();
+
+    dsp_count: s32;
+    error := FMOD_ChannelGroup_GetNumDSPs(channel_group, *dsp_count);
+    assert(!error);
+
+    for i: 0..dsp_count - 1 {
+        current: *FMOD_DSP;
+        error = FMOD_ChannelGroup_GetDSP(channel_group, i, *current);
+        assert(!error);
+
+        if current == dsp.dsp {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 get_guid :: (guid: *u8) -> FMOD_GUID {
     value: FMOD_GUID;
     FMOD_Studio_ParseID(guid, *value);
@@ -453,7 +570,7 @@ get_custom_rolloff_for_distance :: (distance: float) -> [] Vector3 {
 }
 
 fmod_callback :: (system: *FMOD_STUDIO_SYSTEM, type: FMOD_STUDIO_SYSTEM_CALLBACK_TYPE, commanddata: *void, userdata: *void) -> FMOD_RESULT #c_call {
-    empty: Context;
+    empty: #Context;
     push_context empty {
         if preupdate_callback && (type & FMOD_STUDIO_SYSTEM_CALLBACK_PREUPDATE) {
             preupdate_callback();
