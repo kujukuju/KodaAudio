@@ -3,12 +3,6 @@ SoundInstance :: struct {
     event_instance: *FMOD_STUDIO_EVENTINSTANCE;
 }
 
-VolumeData :: struct {
-    volume: float;
-    rolloff_volume: float;
-}
-#assert(size_of(VolumeData) == size_of(*void));
-
 is_valid :: (instance: SoundInstance) -> bool {
     return instance.event_instance && FMOD_Studio_EventInstance_IsValid(instance.event_instance);
 } @thread
@@ -106,7 +100,7 @@ get_hardware_latency :: (instance: SoundInstance) -> int {
     if !channel_group {
         return 0;
     }
-    
+
     child_clock: u64;
     parent_clock: u64;
     error := FMOD_ChannelGroup_GetDSPClock(channel_group, *child_clock, *parent_clock);
@@ -162,7 +156,7 @@ get_type :: (instance: SoundInstance) -> SoundType {
     is_3d: FMOD_BOOL;
     error = FMOD_Studio_EventDescription_Is3D(event_description, *is_3d);
     assert(!error);
-    
+
     if is_3d {
         return .Sound3;
     }
@@ -170,39 +164,19 @@ get_type :: (instance: SoundInstance) -> SoundType {
     return .Sound2;
 } @thread
 
-// get_volume_scale :: (instance: SoundInstance) -> float {
-
-// } @thread
-
-// set_volume_scale :: (instance: SoundInstance, volume_scale: float) {
-
-// } @thread
-
-// get_rolloff_volume :: (instance: SoundInstance) -> float {
-//     if !is_valid(instance) {
-//         return 0;
-//     }
-
-//     volume_data: VolumeData;
-//     error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *volume_data);
-//     assert(!error);
-
-//     return volume_data.rolloff_volume;
-// }
-
 get_volume :: (instance: SoundInstance) -> float, float {
     if !is_valid(instance) {
         return 0, 0;
     }
-    
-    volume_data: VolumeData;
-    error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *volume_data);
+
+    userdata: *SoundInstanceUserData;
+    error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *userdata);
     assert(!error, "Event instance get user data failed. %\n", error);
     if error {
         return 0, 0;
     }
 
-    return volume_data.volume, volume_data.rolloff_volume;
+    return userdata.volume, userdata.rolloff_volume;
 } @thread
 
 set_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float, resolve: bool = true) {
@@ -210,15 +184,15 @@ set_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float, re
         return;
     }
 
-    volume_data: VolumeData;
-    volume_data.volume = volume;
-    volume_data.rolloff_volume = rolloff_volume;
-
-    error := FMOD_Studio_EventInstance_SetUserData(instance.event_instance, (cast(**void) *volume_data).*);
+    userdata: *SoundInstanceUserData;
+    error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *userdata);
     assert(!error);
 
+    userdata.volume = volume;
+    userdata.rolloff_volume = rolloff_volume;
+
     if resolve {
-        resolve_volume(instance, volume_data.volume, volume_data.rolloff_volume);
+        resolve_volume(instance, userdata.volume, userdata.rolloff_volume);
     }
 }
 
@@ -227,15 +201,15 @@ set_volume :: (instance: SoundInstance, volume: float, resolve: bool = true) {
         return;
     }
 
-    volume_data: VolumeData;
-    volume_data.volume, volume_data.rolloff_volume = get_volume(instance);
-    volume_data.volume = volume;
-
-    error := FMOD_Studio_EventInstance_SetUserData(instance.event_instance, (cast(**void) *volume_data).*);
+    userdata: *SoundInstanceUserData;
+    error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *userdata);
     assert(!error);
 
+    userdata.volume, userdata.rolloff_volume = get_volume(instance);
+    userdata.volume = volume;
+
     if resolve {
-        resolve_volume(instance, volume_data.volume, volume_data.rolloff_volume);
+        resolve_volume(instance, userdata.volume, userdata.rolloff_volume);
     }
 } @thread
 
@@ -244,14 +218,14 @@ set_rolloff_volume :: (instance: SoundInstance, rolloff_volume: float) {
         return;
     }
 
-    volume_data: VolumeData;
-    volume_data.volume, volume_data.rolloff_volume = get_volume(instance);
-    volume_data.rolloff_volume = rolloff_volume;
-
-    error := FMOD_Studio_EventInstance_SetUserData(instance.event_instance, (cast(**void) *volume_data).*);
+    userdata: *SoundInstanceUserData;
+    error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *userdata);
     assert(!error);
 
-    resolve_volume(instance, volume_data.volume, volume_data.rolloff_volume);
+    userdata.volume, userdata.rolloff_volume = get_volume(instance);
+    userdata.rolloff_volume = rolloff_volume;
+
+    resolve_volume(instance, userdata.volume, userdata.rolloff_volume);
 } @thread
 
 resolve_volume :: (instance: SoundInstance) {
@@ -269,7 +243,7 @@ resolve_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float
     }
 
     error := FMOD_Studio_EventInstance_SetVolume(instance.event_instance, volume * rolloff_volume);
-    assert(!error);
+    assert(!error, "Resolve volume error. %\n", error);
 } @thread
 
 force_volume :: (instance: SoundInstance, volume: float) {
@@ -279,6 +253,7 @@ force_volume :: (instance: SoundInstance, volume: float) {
 
     error := FMOD_Studio_EventInstance_SetVolume(instance.event_instance, volume);
     assert(!error);
+    assert(!error, "Force volume error. %\n", error);
 } @thread
 
 get_duration :: (instance: SoundInstance) -> int {
@@ -305,6 +280,69 @@ stop :: (instance: SoundInstance) {
     error := FMOD_Studio_EventInstance_Stop(instance.event_instance, .ALLOWFADEOUT);
     assert(!error);
 } @thread
+
+has_channel_group :: (instance: SoundInstance) -> bool {
+    channel_group: *FMOD_CHANNELGROUP;
+    error := FMOD_Studio_EventInstance_GetChannelGroup(instance.event_instance, *channel_group);
+
+    return channel_group && !error;
+} @thread
+
+attach_dsp :: (instance: SoundInstance, dsp: *FMOD_DSP) {
+    channel_group: *FMOD_CHANNELGROUP;
+    error := FMOD_Studio_EventInstance_GetChannelGroup(instance.event_instance, *channel_group);
+    assert(!error, "Could not get the channel group to attach dsp. %\n", error);
+
+    error = FMOD_ChannelGroup_AddDSP(channel_group, cast(s32) FMOD_CHANNELCONTROL_DSP_INDEX.TAIL, dsp);
+    assert(!error, "Could not attach dsp to event instance channel group. %\n", error);
+} @thread
+
+detach_dsp :: (instance: SoundInstance, dsp: *FMOD_DSP) {
+    channel_group: *FMOD_CHANNELGROUP;
+    error := FMOD_Studio_EventInstance_GetChannelGroup(instance.event_instance, *channel_group);
+    assert(!error, "Could not get the channel group to detach dsp. %\n", error);
+
+    error = FMOD_ChannelGroup_RemoveDSP(channel_group, dsp);
+    assert(!error, "Could not detach dsp from event instance channel group. %\n", error);
+} @thread
+
+set_pitch_and_speed_semitones :: (instance: SoundInstance, semitones: float) {
+    factor := pow(2.0, semitones / 12.0);
+    set_pitch_and_speed(instance, factor);
+}
+
+set_pitch_and_speed :: (instance: SoundInstance, pitch: float) {
+    if !is_valid(instance) {
+        return;
+    }
+
+    error := FMOD_Studio_EventInstance_SetPitch(instance.event_instance, pitch);
+    assert(!error, "Could not set pitch. %\n", error);
+}
+
+#scope_module
+
+SoundInstanceUserData :: struct {
+    volume: float;
+    rolloff_volume: float;
+    core_sound: *FMOD_SOUND;
+}
+
+sound_instance_lifecycle_callback :: (type: FMOD_STUDIO_EVENT_CALLBACK_TYPE, event: *FMOD_STUDIO_EVENTINSTANCE, parameters: *void) -> FMOD_RESULT #c_call {
+    if type == FMOD_STUDIO_EVENT_CALLBACK_DESTROYED {
+        userdata: *SoundInstanceUserData;
+        FMOD_Studio_EventInstance_GetUserData(event, cast(**void) *userdata);
+
+        if userdata {
+            empty: #Context;
+            push_context empty {
+                free(userdata);
+            }
+        }
+    }
+
+    return .FMOD_OK;
+}
 
 
 // get_volume :: (instance: SoundInstance) -> float {
@@ -544,7 +582,7 @@ stop :: (instance: SoundInstance) {
 //     if !instance.fmod_channel {
 //         return 0;
 //     }
-    
+
 //     strength: float;
 //     FMOD_Channel_Get3DLevel(instance.fmod_channel, *strength);
 //     return strength;
@@ -615,7 +653,7 @@ stop :: (instance: SoundInstance) {
 // is_done_fading_out :: (instance: SoundInstance) -> bool {
 //     numpoints: u32;
 //     FMOD_Channel_GetFadePoints(instance.fmod_channel, *numpoints, null, null);
-    
+
 //     points := NewArray(numpoints, u64, allocator = temp);
 //     volumes := NewArray(numpoints, float, allocator = temp);
 //     FMOD_Channel_GetFadePoints(instance.fmod_channel, *numpoints, points.data, volumes.data);
@@ -677,7 +715,7 @@ stop :: (instance: SoundInstance) {
 // is_done_fading_in :: (instance: SoundInstance) -> bool {
 //     numpoints: u32;
 //     FMOD_Channel_GetFadePoints(instance.fmod_channel, *numpoints, null, null);
-    
+
 //     points := NewArray(numpoints, u64, allocator = temp);
 //     volumes := NewArray(numpoints, float, allocator = temp);
 //     FMOD_Channel_GetFadePoints(instance.fmod_channel, *numpoints, points.data, volumes.data);
@@ -736,7 +774,7 @@ stop :: (instance: SoundInstance) {
 
 //     length: u32;
 //     FMOD_Sound_GetLength(fmod_sound, *length, FMOD_TIMEUNIT_PCM);
-    
+
 //     sample_rate := koda_audio_get_sample_rate();
 
 //     return length * 1000.0 / sample_rate;

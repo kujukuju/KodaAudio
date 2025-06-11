@@ -43,17 +43,65 @@ load_sound :: (path: string) -> *Sound {
     return sound;
 }
 
-play_sound :: (sound: *Sound, volume: float = 1.0, index: int = -1) -> SoundInstance, int {
+get_sound :: (name: string) -> *Sound {
+    found, sound := table_find_new(*loaded_sounds, create_fixed_string(name, 128));
+    assert(found, "Could not find sound to play. %\n", name);
+
+    return sound;
+}
+
+play_sound :: (name: string, volume: float = 1.0) -> SoundInstance {
+    sound := get_sound(name);
+    if !sound {
+        return .{};
+    }
+
+    instance := play_sound(sound, volume);
+    return instance;
+}
+
+play_sound :: (sound: string, position: Vector3, volume: float = 1.0) -> SoundInstance {
+    instance := play_sound(get_sound(sound), position, volume);
+    return instance;
+} @thread
+
+play_sound :: (sound: *Sound, position: Vector3, volume: float = 1.0) -> SoundInstance {
+    instance := play_sound(sound, volume);
+    set_position(instance, position);
+
+    return instance;
+} @thread
+
+play_sound :: (sound: string, position: Vector3, velocity: Vector3, volume: float = 1.0) -> SoundInstance {
+    instance := play_sound(get_sound(sound), position, velocity, volume);
+    return instance;
+} @thread
+
+play_sound :: (sound: *Sound, position: Vector3, velocity: Vector3, volume: float = 1.0) -> SoundInstance {
+    instance := play_sound(sound, volume);
+    set_position_velocity(instance, position, velocity);
+
+    return instance;
+} @thread
+
+play_sound :: (sound: *Sound, volume: float = 1.0) -> SoundInstance {
     if !sound || !sound.event_description {
-        return .{}, -1;
+        return .{};
     }
 
     instance: SoundInstance;
 
     error := FMOD_Studio_EventDescription_CreateInstance(sound.event_description, *instance.event_instance);
     assert(!error);
-    
+
     error = FMOD_Studio_EventInstance_SetVolume(instance.event_instance, 0);
+    assert(!error);
+
+    userdata := New(SoundInstanceUserData);
+    error = FMOD_Studio_EventInstance_SetUserData(instance.event_instance, userdata);
+    assert(!error);
+
+    error = FMOD_Studio_EventInstance_SetCallback(instance.event_instance, sound_instance_lifecycle_callback, FMOD_STUDIO_EVENT_CALLBACK_DESTROYED);
     assert(!error);
 
     error = FMOD_Studio_EventInstance_Start(instance.event_instance);
@@ -69,45 +117,125 @@ play_sound :: (sound: *Sound, volume: float = 1.0, index: int = -1) -> SoundInst
         thread_safe_event_start_callback(instance);
     }
 
-    return instance, -1;
+    return instance;
 } @thread
 
-play_sound :: (sound: *Sound, position: Vector3, volume: float = 1.0, index: int = -1) -> SoundInstance, int {
-    instance := play_sound(sound, volume, index);
-    set_position(instance, position);
-
-    return instance, -1;
+play_programmer_sound :: (sound: string, core_sound: *FMOD_SOUND, $destroyed_callback: #type (params: *FMOD_STUDIO_PROGRAMMER_SOUND_PROPERTIES) #c_call = null, $event_created_callback: #type (event: *FMOD_STUDIO_EVENTINSTANCE) #c_call = null) -> SoundInstance {
+    return play_programmer_sound(get_sound(sound), core_sound, destroyed_callback, event_created_callback);
 } @thread
 
-play_sound :: (sound: *Sound, position: Vector3, velocity: Vector3, volume: float = 1.0, index: int = -1) -> SoundInstance, int {
-    instance := play_sound(sound, volume, index);
-    set_position_velocity(instance, position, velocity);
-
-    return instance, -1;
-} @thread
-
-get_path :: (sound: *Sound) -> string {
-    path: [..] u8;
-    path.allocator = temp;
-    array_reserve(*path, 256);
-
-    used_count := cast(s32) path.allocated;
-    while used_count == path.allocated {
-        if FMOD_Studio_EventDescription_GetPath(sound.event_description, path.data, cast(s32) path.allocated, *used_count) {
-            assert(false, "Could not get path.\n");
-            return "";
-        }
-
-        path.count = used_count;
-        if used_count == path.allocated {
-            array_reserve(*path, path.allocated * 2);
-        }
+play_programmer_sound :: (sound: *Sound, core_sound: *FMOD_SOUND, $destroyed_callback: #type (params: *FMOD_STUDIO_PROGRAMMER_SOUND_PROPERTIES) #c_call = null, $event_created_callback: #type (event: *FMOD_STUDIO_EVENTINSTANCE) #c_call = null) -> SoundInstance {
+    if !sound || !sound.event_description || !core_sound {
+        return .{};
     }
 
-    path_string: string;
-    path_string.data = path.data;
-    path_string.count = path.count;
-    return path_string;
+    instance: SoundInstance;
+
+    error := FMOD_Studio_EventDescription_CreateInstance(sound.event_description, *instance.event_instance);
+    assert(!error);
+
+    // error = FMOD_Studio_EventInstance_SetVolume(instance.event_instance, 0);
+    error = FMOD_Studio_EventInstance_SetVolume(instance.event_instance, 1);
+    assert(!error);
+
+    userdata := New(SoundInstanceUserData);
+    userdata.core_sound = core_sound;
+    userdata.volume = 1.0; // TODO DELETE ONCE ITS A SOUND3
+    userdata.rolloff_volume = 1.0; // TODO DELETE ONCE ITS A SOUND3
+    error = FMOD_Studio_EventInstance_SetUserData(instance.event_instance, userdata);
+    assert(!error);
+
+    programmer_sound_callback :: (type: FMOD_STUDIO_EVENT_CALLBACK_TYPE, event: *FMOD_STUDIO_EVENTINSTANCE, parameters: *void) -> FMOD_RESULT #c_call {
+        if type == FMOD_STUDIO_EVENT_CALLBACK_CREATE_PROGRAMMER_SOUND {
+            params := cast(*FMOD_STUDIO_PROGRAMMER_SOUND_PROPERTIES) parameters;
+            userdata: *SoundInstanceUserData;
+            FMOD_Studio_EventInstance_GetUserData(event, cast(**void) *userdata);
+
+            core_sound := userdata.core_sound;
+
+            if core_sound {
+                params.sound = core_sound;
+                params.subsoundIndex = -1;
+            }
+        }
+
+        #if destroyed_callback {
+            if type == FMOD_STUDIO_EVENT_CALLBACK_DESTROY_PROGRAMMER_SOUND {
+                params := cast(*FMOD_STUDIO_PROGRAMMER_SOUND_PROPERTIES) parameters;
+                destroyed_callback(params);
+            }
+        }
+
+        #if event_created_callback {
+            if type == FMOD_STUDIO_EVENT_CALLBACK_CREATED {
+                event_created_callback(event);
+            }
+        }
+
+        // TODO delete sound?
+
+        return sound_instance_lifecycle_callback(type, event, parameters);
+    }
+
+    callback_events: FMOD_STUDIO_EVENT_CALLBACK_TYPE;
+    callback_events = FMOD_STUDIO_EVENT_CALLBACK_CREATE_PROGRAMMER_SOUND | FMOD_STUDIO_EVENT_CALLBACK_DESTROYED;
+
+    #if destroyed_callback {
+        callback_events |= FMOD_STUDIO_EVENT_CALLBACK_DESTROY_PROGRAMMER_SOUND;
+    }
+
+    #if event_created_callback {
+        callback_events |= FMOD_STUDIO_EVENT_CALLBACK_CREATED;
+    }
+
+    error = FMOD_Studio_EventInstance_SetCallback(
+        instance.event_instance,
+        programmer_sound_callback,
+        callback_events);
+    assert(!error);
+
+    error = FMOD_Studio_EventInstance_Start(instance.event_instance);
+    assert(!error);
+
+    if event_start_callback {
+        thread_safe_event_start_callback :: inline (instance: SoundInstance) {
+            event_start_callback(instance);
+        } @thread_safe
+
+        thread_safe_event_start_callback(instance);
+    }
+
+    return instance;
+} @thread
+
+get_path :: (sound: *Sound) -> FixedString(512) {
+    path: FixedString(512);
+
+    used_count: s32;
+    error := FMOD_Studio_EventDescription_GetPath(sound.event_description, path.buffer.data, cast(s32) path.buffer.count, *used_count);
+    assert(!error, "Could not get path.\n");
+
+    assert(used_count <= path.buffer.count, "Path buffer not large enough for sound path. %\n", to_string(*path));
+
+    return path;
+}
+
+get_core_sound :: (sound: *Sound) -> *FMOD_SOUND {
+    path := get_path(sound);
+
+    sound_info: FMOD_STUDIO_SOUND_INFO;
+    print("sound path %\n", to_string(guid));
+    error := FMOD_Studio_System_GetSoundInfo(fmod_system, guid, *sound_info);
+    assert(!error, "Could not get sound info. %\n", error);
+
+    soundgroup := sound_info.exinfo.initialsoundgroup;
+    subindex := sound_info.subsoundindex;
+
+    core_sound: *FMOD_SOUND;
+    error = FMOD_SoundGroup_GetSound(soundgroup, subindex, *core_sound);
+    assert(!error, "Could not get the sound from the sound group. %\n", error);
+
+    return core_sound;
 }
 
 
@@ -309,5 +437,5 @@ get_path :: (sound: *Sound) -> string {
 // }
 
 // pause_sound :: (sound: Sound) {
-    
+
 // }
