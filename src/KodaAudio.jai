@@ -29,17 +29,19 @@ koda_audio_init :: () {
     no_temporary_storage.overflow_allocator = no_temporary_allocator;
     no_temporary_context.temporary_storage = *no_temporary_storage;
 
-    // FMOD_System_SetDSPBufferSize(fmod_system, 4096, 2);
+    initializer_of(#Context)(*fmod_callback_context);
+    ts := *fmod_callback_temporary_storage;
+    set_initial_data(ts, TEMPORARY_STORAGE_SIZE, fmod_callback_temporary_storage_data.data);
+    fmod_callback_context.temporary_storage = ts;
 }
 
 koda_audio_load_bank :: (path: string) {
     assert(path.count < 512, "Your path is too long!");
-    // assert(!fmod_bank, "You cannot already have loaded a bank.");
 
-    fixed: [512] u8;
-    memcpy(fixed.data, path.data, path.count);
+    fixed := create_fixed_string(path, 512);
 
-    error := FMOD_Studio_System_LoadBankFile(fmod_system, fixed.data, FMOD_STUDIO_LOAD_BANK_NORMAL, *fmod_bank);
+    fmod_bank: *FMOD_STUDIO_BANK;
+    error := FMOD_Studio_System_LoadBankFile(fmod_system, to_c_string(*fixed), FMOD_STUDIO_LOAD_BANK_NORMAL, *fmod_bank);
     assert(!error);
 
     state: FMOD_STUDIO_LOADING_STATE;
@@ -52,22 +54,59 @@ koda_audio_load_bank :: (path: string) {
     assert(state == .LOADED);
 }
 
+koda_audio_load_bank_begin :: (path: string) -> *FMOD_STUDIO_BANK {
+    assert(path.count < 512, "Your path is too long!");
+
+    fixed := create_fixed_string(path, 512);
+
+    fmod_bank: *FMOD_STUDIO_BANK;
+    error := FMOD_Studio_System_LoadBankFile(fmod_system, to_c_string(*fixed), FMOD_STUDIO_LOAD_BANK_NONBLOCKING, *fmod_bank);
+    assert(!error);
+
+    state: FMOD_STUDIO_LOADING_STATE;
+    FMOD_Studio_Bank_GetLoadingState(fmod_bank, *state);
+    assert(state == .LOADING || state == .LOADED);
+
+    return fmod_bank;
+}
+
+koda_audio_load_bank_end :: (bank: *FMOD_STUDIO_BANK) {
+    state: FMOD_STUDIO_LOADING_STATE;
+    FMOD_Studio_Bank_GetLoadingState(bank, *state);
+    while state == .LOADING {
+        error := FMOD_Studio_System_Update(fmod_system);
+        assert(!error, "Could not update fmod system.\n");
+
+        sleep_milliseconds(1);
+        FMOD_Studio_Bank_GetLoadingState(bank, *state);
+    }
+    assert(state == .LOADED, "Bank could not be loaded.\n");
+
+    FMOD_Studio_Bank_LoadSampleData(bank);
+
+    FMOD_Studio_Bank_GetLoadingState(bank, *state);
+    assert(state == .LOADED, "Could not load bank sample data.\n");
+}
+
 koda_audio_load_sounds :: () {
     bank_count: s32;
     error := FMOD_Studio_System_GetBankCount(fmod_system, *bank_count);
     assert(!error, "Could not load banks.\n");
+    if error || bank_count < 0  return;
 
     banks := NewArray(bank_count, *FMOD_STUDIO_BANK,, temp);
     banks_loaded_count: s32;
 
     error = FMOD_Studio_System_GetBankList(fmod_system, banks.data, bank_count, *banks_loaded_count);
     banks.count = banks_loaded_count;
+    if error || banks_loaded_count < 0  return;
 
     event_count: s32;
     for bank: banks {
         current_event_count: s32;
         error = FMOD_Studio_Bank_GetEventCount(bank, *current_event_count);
         assert(!error, "Could not load bank events.\n");
+        if error || current_event_count < 0  return;
 
         event_count += current_event_count;
     }
@@ -85,6 +124,7 @@ koda_audio_load_sounds :: () {
         loaded_event_count: s32;
         error = FMOD_Studio_Bank_GetEventList(bank, events.data + event_offset, remaining_events, *loaded_event_count);
         assert(!error, "Could not load bank events.\n");
+        if error || loaded_event_count < 0  return;
 
         events.count += loaded_event_count;
     }
@@ -93,11 +133,18 @@ koda_audio_load_sounds :: () {
         name: FixedString(128);
 
         name_count: s32;
-        FMOD_Studio_EventDescription_GetPath(event, name.buffer.data, 128, *name_count);
+        error = FMOD_Studio_EventDescription_GetPath(event, name.buffer.data, 128, *name_count);
         assert(name_count < 128, "Loaded a sound file that had more than 128 path characters. %\n", to_string(*name));
+        if error || name_count < 0  return;
+
+        // this has already been loaded
+        if table_contains(*loaded_sounds, name) {
+            continue;
+        }
 
         sound := load_sound(to_string(*name));
         assert(!!sound, "Could not load sound file. %\n", to_string(*name));
+        if !sound  continue;
 
         table_set(*loaded_sounds, name, sound);
     }
@@ -139,10 +186,16 @@ koda_audio_get_muted :: () -> bool {
     master_bus: *FMOD_STUDIO_BUS;
     error := FMOD_Studio_System_GetBus(fmod_system, "bus:/", *master_bus);
     assert(!error);
+    if error {
+        return false;
+    }
 
     muted: FMOD_BOOL;
     error = FMOD_Studio_Bus_GetMuted(master_bus, *muted);
     assert(!error);
+    if error {
+        return false;
+    }
 
     return !!muted;
 }
@@ -214,6 +267,9 @@ koda_audio_get_banks :: () -> [] *FMOD_STUDIO_BANK {
     count: s32;
     error := FMOD_Studio_System_GetBankCount(fmod_system, *count);
     assert(!error);
+    if error || count < 0 {
+        return .[];
+    }
 
     banks := NewArray(count, *FMOD_STUDIO_BANK,, temp);
 
@@ -221,6 +277,9 @@ koda_audio_get_banks :: () -> [] *FMOD_STUDIO_BANK {
     error = FMOD_Studio_System_GetBankList(fmod_system, banks.data, cast(s32) banks.count, *bank_count);
     assert(!error);
     banks.count = bank_count;
+    if error || bank_count < 0 {
+        return .[];
+    }
 
     return banks;
 }
@@ -262,9 +321,16 @@ koda_audio_get_banks :: () -> [] *FMOD_STUDIO_BANK {
 koda_audio_get_event_descriptions :: (banks: [] *FMOD_STUDIO_BANK) -> [] *FMOD_STUDIO_EVENTDESCRIPTION {
     total_count: s32;
     for bank: banks {
+        state: FMOD_STUDIO_LOADING_STATE;
+        FMOD_Studio_Bank_GetLoadingState(bank, *state);
+        if state != .LOADED  continue;
+
         count: s32;
         error := FMOD_Studio_Bank_GetEventCount(bank, *count);
         assert(!error, "Cannot get event count. %\n", error);
+        if error || count < 0 {
+            return .[];
+        }
 
         total_count += count;
     }
@@ -288,9 +354,17 @@ koda_audio_get_event_descriptions :: (banks: [] *FMOD_STUDIO_BANK) -> [] *FMOD_S
     events.count = 0;
 
     for bank: banks {
+        state: FMOD_STUDIO_LOADING_STATE;
+        FMOD_Studio_Bank_GetLoadingState(bank, *state);
+        if state != .LOADED  continue;
+
         real_count: s32;
         error := FMOD_Studio_Bank_GetEventList(bank, events.data + events.count, total_count - cast(s32) events.count, *real_count);
         assert(!error, "Cannot get event list. %\n", error);
+        if error || real_count < 0 {
+            return .[];
+        }
+
         events.count += real_count;
     }
 
@@ -351,6 +425,10 @@ koda_audio_get_event_instances :: (events: [] *FMOD_STUDIO_EVENTDESCRIPTION) -> 
         error := FMOD_Studio_EventDescription_GetInstanceCount(event, *count);
         assert(!error, "Cannot get instance count. %\n", error);
 
+        if error || count < 0 {
+            return .[];
+        }
+
         total_count += count;
     }
 
@@ -381,6 +459,9 @@ koda_audio_get_event_instances :: (events: [] *FMOD_STUDIO_EVENTDESCRIPTION) -> 
         used_count: s32;
         error = FMOD_Studio_EventDescription_GetPath(event, path.buffer.data, cast(s32) path.buffer.count, *used_count);
         assert(!error, "Could not get path.\n");
+        if error || used_count < 0 {
+            return .[];
+        }
 
         instances.count += real_count;
     }
@@ -679,15 +760,17 @@ get_guid :: (guid: *u8) -> FMOD_GUID {
     return value;
 }
 
-fmod_bank: *FMOD_STUDIO_BANK;
 fmod_system: *FMOD_STUDIO_SYSTEM;
 fmod_core_system: *FMOD_SYSTEM;
 
 #scope_module
 
 fmod_callback_context: #Context;
+fmod_callback_temporary_storage: Temporary_Storage;
+fmod_callback_temporary_storage_data: [TEMPORARY_STORAGE_SIZE] u8 #align 64;
 
 fmod_callback :: (system: *FMOD_STUDIO_SYSTEM, type: FMOD_STUDIO_SYSTEM_CALLBACK_TYPE, commanddata: *void, userdata: *void) -> FMOD_RESULT #c_call {
+    fmod_callback_context.stack_trace = null;
     push_context fmod_callback_context {
         if preupdate_callback && (type & FMOD_STUDIO_SYSTEM_CALLBACK_PREUPDATE) {
             preupdate_callback(userdata);
@@ -713,7 +796,7 @@ no_temporary_callback :: (mode: Allocator_Mode, size: s64, old_size: s64, old_me
 }
 no_temporary_allocator := Allocator.{no_temporary_callback, null};
 
-loaded_sounds: Table(FixedString(128), *Sound, given_hash_function = fixed_string_hash, given_compare_function = fixed_string_equals);
+loaded_sounds: Table(FixedString(128), *Sound);
 
 custom_rolloff: [..] Vector2;
 custom_rolloff_distance: float;

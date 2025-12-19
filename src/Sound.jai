@@ -44,7 +44,7 @@ load_sound :: (path: string) -> *Sound {
 }
 
 get_sound :: (name: string) -> *Sound {
-    found, sound := table_find_new(*loaded_sounds, create_fixed_string(name, 128));
+    found, sound := table_find(*loaded_sounds, create_fixed_string(name, 128));
     assert(found, "Could not find sound to play. %\n", name);
 
     return sound;
@@ -120,11 +120,11 @@ play_sound :: (sound: *Sound, volume: float = 1.0) -> SoundInstance {
     return instance;
 } @thread
 
-play_programmer_sound :: (sound: string, core_sound: *FMOD_SOUND, $destroyed_callback: #type (params: *FMOD_STUDIO_PROGRAMMER_SOUND_PROPERTIES) #c_call = null, $event_created_callback: #type (event: *FMOD_STUDIO_EVENTINSTANCE) #c_call = null) -> SoundInstance {
+play_programmer_sound :: (sound: string, core_sound: *FMOD_SOUND, $destroyed_callback: #type (sound: *FMOD_SOUND) #c_call = null, $event_created_callback: #type (event: *FMOD_STUDIO_EVENTINSTANCE) #c_call = null) -> SoundInstance {
     return play_programmer_sound(get_sound(sound), core_sound, destroyed_callback, event_created_callback);
 } @thread
 
-play_programmer_sound :: (sound: *Sound, core_sound: *FMOD_SOUND, $destroyed_callback: #type (params: *FMOD_STUDIO_PROGRAMMER_SOUND_PROPERTIES) #c_call = null, $event_created_callback: #type (event: *FMOD_STUDIO_EVENTINSTANCE) #c_call = null) -> SoundInstance {
+play_programmer_sound :: (sound: *Sound, core_sound: *FMOD_SOUND, $destroyed_callback: #type (sound: *FMOD_SOUND) #c_call = null, $event_created_callback: #type (event: *FMOD_STUDIO_EVENTINSTANCE) #c_call = null) -> SoundInstance {
     if !sound || !sound.event_description || !core_sound {
         return .{};
     }
@@ -160,9 +160,11 @@ play_programmer_sound :: (sound: *Sound, core_sound: *FMOD_SOUND, $destroyed_cal
         }
 
         #if destroyed_callback {
-            if type == FMOD_STUDIO_EVENT_CALLBACK_DESTROY_PROGRAMMER_SOUND {
-                params := cast(*FMOD_STUDIO_PROGRAMMER_SOUND_PROPERTIES) parameters;
-                destroyed_callback(params);
+            if type == FMOD_STUDIO_EVENT_CALLBACK_DESTROYED {
+                userdata: *SoundInstanceUserData;
+                FMOD_Studio_EventInstance_GetUserData(event, cast(**void) *userdata);
+                destroyed_callback(userdata.core_sound);
+                userdata.core_sound = null;
             }
         }
 
@@ -171,8 +173,6 @@ play_programmer_sound :: (sound: *Sound, core_sound: *FMOD_SOUND, $destroyed_cal
                 event_created_callback(event);
             }
         }
-
-        // TODO delete sound?
 
         return sound_instance_lifecycle_callback(type, event, parameters);
     }
@@ -220,11 +220,18 @@ get_path :: (sound: *Sound) -> FixedString(512) {
     return path;
 }
 
+is_looping :: (sound: *Sound) -> bool {
+    oneshot: s32;
+    error := FMOD_Studio_EventDescription_IsOneshot(sound.event_description, *oneshot);
+    assert(!error, "Could not get looping status.\n");
+
+    return !oneshot;
+}
+
 get_core_sound :: (sound: *Sound) -> *FMOD_SOUND {
     path := get_path(sound);
 
     sound_info: FMOD_STUDIO_SOUND_INFO;
-    print("sound path %\n", to_string(guid));
     error := FMOD_Studio_System_GetSoundInfo(fmod_system, guid, *sound_info);
     assert(!error, "Could not get sound info. %\n", error);
 

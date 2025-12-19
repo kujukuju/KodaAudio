@@ -98,7 +98,7 @@ get_recording_driver_info :: (driver: int) -> FixedString(512), sample_rate: s32
         *speaker_mode,
         *channels,
         *state);
-    assert(!error, "Could not get recording driver info.\n");
+    // assert(!error, "Could not get recording driver info.\n");
 
     // position: u32;
     // error = FMOD_System_GetRecordPosition(

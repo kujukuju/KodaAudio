@@ -320,6 +320,10 @@ set_pitch_and_speed :: (instance: SoundInstance, pitch: float) {
     assert(!error, "Could not set pitch. %\n", error);
 }
 
+is_looping :: (instance: SoundInstance) -> bool {
+    return is_looping(get_sound(instance));
+}
+
 #scope_module
 
 SoundInstanceUserData :: struct {
