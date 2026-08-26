@@ -26,8 +26,7 @@ koda_audio_init :: () {
     result = FMOD_Studio_System_GetCoreSystem(fmod_system, *fmod_core_system);
     assert(!result, "Could not get core system.\n");
 
-    no_temporary_storage_paged := cast(*Temporary_Storage_Paged_Alloc) *no_temporary_storage;
-    no_temporary_storage_paged.overflow_allocator = no_temporary_allocator;
+    no_temporary_storage.overflow_allocator = no_temporary_allocator;
     no_temporary_context.temporary_storage = *no_temporary_storage;
 
     initializer_of(#Context)(*fmod_callback_context);
@@ -35,9 +34,8 @@ koda_audio_init :: () {
     ts.data = fmod_callback_temporary_storage_data.data;
     ts.size = TEMPORARY_STORAGE_SIZE;
 
-    ts_paged := cast(*Temporary_Storage_Paged_Alloc) ts;
-    ts_paged.original_data = ts.data;
-    ts_paged.original_size = ts.size;
+    ts.original_data = ts.data;
+    ts.original_size = ts.size;
 
     fmod_callback_context.temporary_storage = ts;
 }
