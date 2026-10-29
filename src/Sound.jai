@@ -50,41 +50,41 @@ get_sound :: (name: string) -> *Sound {
     return sound;
 }
 
-play_sound :: (name: string, volume: float = 1.0) -> SoundInstance {
+play_sound :: (name: string, volume: float = 1.0, playback_rate: float = 1.0) -> SoundInstance {
     sound := get_sound(name);
     if !sound {
         return .{};
     }
 
-    instance := play_sound(sound, volume);
+    instance := play_sound(sound, volume, playback_rate);
     return instance;
 }
 
-play_sound :: (sound: string, position: Vector3, volume: float = 1.0) -> SoundInstance {
-    instance := play_sound(get_sound(sound), position, volume);
+play_sound :: (sound: string, position: Vector3, volume: float = 1.0, playback_rate: float = 1.0) -> SoundInstance {
+    instance := play_sound(get_sound(sound), position, volume, playback_rate);
     return instance;
 } @thread
 
-play_sound :: (sound: *Sound, position: Vector3, volume: float = 1.0) -> SoundInstance {
-    instance := play_sound(sound, volume);
+play_sound :: (sound: *Sound, position: Vector3, volume: float = 1.0, playback_rate: float = 1.0) -> SoundInstance {
+    instance := play_sound(sound, volume, playback_rate);
     set_position(instance, position);
 
     return instance;
 } @thread
 
-play_sound :: (sound: string, position: Vector3, velocity: Vector3, volume: float = 1.0) -> SoundInstance {
-    instance := play_sound(get_sound(sound), position, velocity, volume);
+play_sound :: (sound: string, position: Vector3, velocity: Vector3, volume: float = 1.0, playback_rate: float = 1.0) -> SoundInstance {
+    instance := play_sound(get_sound(sound), position, velocity, volume, playback_rate);
     return instance;
 } @thread
 
-play_sound :: (sound: *Sound, position: Vector3, velocity: Vector3, volume: float = 1.0) -> SoundInstance {
-    instance := play_sound(sound, volume);
+play_sound :: (sound: *Sound, position: Vector3, velocity: Vector3, volume: float = 1.0, playback_rate: float = 1.0) -> SoundInstance {
+    instance := play_sound(sound, volume, playback_rate);
     set_position_velocity(instance, position, velocity);
 
     return instance;
 } @thread
 
-play_sound :: (sound: *Sound, volume: float = 1.0) -> SoundInstance {
+play_sound :: (sound: *Sound, volume: float = 1.0, playback_rate: float = 1.0) -> SoundInstance {
     if !sound || !sound.event_description {
         return .{};
     }
@@ -104,6 +104,8 @@ play_sound :: (sound: *Sound, volume: float = 1.0) -> SoundInstance {
     error = FMOD_Studio_EventInstance_SetCallback(instance.event_instance, sound_instance_lifecycle_callback, FMOD_STUDIO_EVENT_CALLBACK_DESTROYED);
     assert(!error);
 
+    // Snapshot the rate before FMOD queues the start, including delayed instruments.
+    set_pitch_and_speed(instance, playback_rate);
     error = FMOD_Studio_EventInstance_Start(instance.event_instance);
     assert(!error);
 

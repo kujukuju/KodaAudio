@@ -318,7 +318,7 @@ set_pitch_and_speed :: (instance: SoundInstance, pitch: float) {
 
     error := FMOD_Studio_EventInstance_SetPitch(instance.event_instance, pitch);
     assert(!error, "Could not set pitch. %\n", error);
-}
+} @thread
 
 is_looping :: (instance: SoundInstance) -> bool {
     return is_looping(get_sound(instance));
