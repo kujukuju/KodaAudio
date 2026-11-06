@@ -74,6 +74,8 @@ is_playing :: (instance: SoundInstance) -> bool {
 
     playback_state: FMOD_STUDIO_PLAYBACK_STATE;
     error := FMOD_Studio_EventInstance_GetPlaybackState(instance.event_instance, *playback_state);
+    // FMOD's own update thread destroys a released instance, which can happen right after is_valid.
+    if error == .FMOD_ERR_INVALID_HANDLE return false;
     assert(!error, "Get playback state error. %\n", error);
 
     return playback_state != .STOPPED && playback_state != .STOPPING;
@@ -86,6 +88,7 @@ is_starting :: (instance: SoundInstance) -> bool {
 
     playback_state: FMOD_STUDIO_PLAYBACK_STATE;
     error := FMOD_Studio_EventInstance_GetPlaybackState(instance.event_instance, *playback_state);
+    if error == .FMOD_ERR_INVALID_HANDLE return false; // Destroyed after is_valid, as in is_playing.
     assert(!error, "Get playback state error. %\n", error);
 
     return playback_state == .STARTING;
