@@ -189,6 +189,7 @@ set_volume :: (instance: SoundInstance, volume: float, rolloff_volume: float, re
 
     userdata: *SoundInstanceUserData;
     error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *userdata);
+    if error == .FMOD_ERR_INVALID_HANDLE || !userdata return; // Destroyed after is_valid, as in is_playing.
     assert(!error);
 
     userdata.volume = volume;
@@ -206,6 +207,7 @@ set_volume :: (instance: SoundInstance, volume: float, resolve: bool = true) {
 
     userdata: *SoundInstanceUserData;
     error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *userdata);
+    if error == .FMOD_ERR_INVALID_HANDLE || !userdata return; // Destroyed after is_valid, as in is_playing.
     assert(!error);
 
     userdata.volume, userdata.rolloff_volume = get_volume(instance);
@@ -223,6 +225,7 @@ set_rolloff_volume :: (instance: SoundInstance, rolloff_volume: float) {
 
     userdata: *SoundInstanceUserData;
     error := FMOD_Studio_EventInstance_GetUserData(instance.event_instance, cast(**void) *userdata);
+    if error == .FMOD_ERR_INVALID_HANDLE || !userdata return; // Destroyed after is_valid, as in is_playing.
     assert(!error);
 
     userdata.volume, userdata.rolloff_volume = get_volume(instance);
