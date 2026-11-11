@@ -43,6 +43,11 @@ load_sound :: (path: string) -> *Sound {
     return sound;
 }
 
+// Whether the loaded banks hold this event. (get_sound asserts that they do.)
+is_sound_loaded :: (name: string) -> bool {
+    return table_contains(*loaded_sounds, create_fixed_string(name, 128));
+}
+
 get_sound :: (name: string) -> *Sound {
     found, sound := table_find(*loaded_sounds, create_fixed_string(name, 128));
     assert(found, "Could not find sound to play. %\n", name);
