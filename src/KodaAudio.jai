@@ -621,6 +621,11 @@ koda_audio_get_sample_rate :: () -> int {
     error = FMOD_System_GetSoftwareFormat(core_system, *sample_rate, null, null);
     assert(!error);
 
+    // FMOD can answer 0 (its output device failed or went away; release builds skip the assert),
+    // and callers divide by this: a launch-day crash in koda_audio_get_estimated_delay. 48000 is
+    // FMOD's own default rate, so the delays computed from it stay plausible.
+    if sample_rate <= 0 return 48000;
+
     return sample_rate;
 } @thread
 
